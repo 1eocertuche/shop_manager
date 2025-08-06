@@ -37,6 +37,7 @@ def setup_company_environment():
         income_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Income", "is_group": 1})
         expense_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Expense", "is_group": 1})
         
+        # ... (Otras creaciones de cuentas se mantienen igual) ...
         receivable_account_name = f"Deudores - {abbr}"
         if not frappe.db.exists("Account", receivable_account_name):
             acc = frappe.new_doc("Account")
@@ -72,19 +73,38 @@ def setup_company_environment():
             acc.update({"account_name": "Caja General", "parent_account": current_asset_account, "company": company_name, "account_type": "Cash"})
             acc.insert(ignore_permissions=True)
 
+        # --- NUEVA SECCIÓN: Cuenta de Inventario por Defecto ---
+        stock_asset_account_name = f"Activos de inventario - {abbr}"
+        if not frappe.db.exists("Account", stock_asset_account_name):
+            acc = frappe.new_doc("Account")
+            acc.update({"account_name": "Activos de inventario", "parent_account": asset_root, "company": company_name, "account_type": "Stock"})
+            acc.insert(ignore_permissions=True)
+        company_doc.default_inventory_account = stock_asset_account_name
+        # --- FIN DE LA NUEVA SECCIÓN ---
+
         company_doc.save(ignore_permissions=True)
 
         # 3. Create Default Groups
         if not frappe.db.exists("Warehouse", {"warehouse_name": f"Bodega tienda - {abbr}"}):
-            frappe.new_doc("Warehouse", warehouse_name=f"Bodega tienda - {abbr}", company=company_name).insert(ignore_permissions=True)
+            wh = frappe.new_doc("Warehouse")
+            wh.update({"warehouse_name": f"Bodega tienda - {abbr}", "company": company_name})
+            wh.insert(ignore_permissions=True)
         if not frappe.db.exists("Item Group", "Todos los grupos de productos"):
-            frappe.new_doc("Item Group", item_group_name="Todos los grupos de productos", is_group=1).insert(ignore_permissions=True)
+            ig = frappe.new_doc("Item Group")
+            ig.update({"item_group_name": "Todos los grupos de productos", "is_group": 1})
+            ig.insert(ignore_permissions=True)
         if not frappe.db.exists("Customer Group", "Individual"):
-            frappe.new_doc("Customer Group", customer_group_name="Individual").insert(ignore_permissions=True)
+            cg = frappe.new_doc("Customer Group")
+            cg.update({"customer_group_name": "Individual"})
+            cg.insert(ignore_permissions=True)
         if not frappe.db.exists("Supplier Group", "Todos los grupos de proveedores"):
-            frappe.new_doc("Supplier Group", supplier_group_name="Todos los grupos de proveedores").insert(ignore_permissions=True)
+            sg = frappe.new_doc("Supplier Group")
+            sg.update({"supplier_group_name": "Todos los grupos de proveedores"})
+            sg.insert(ignore_permissions=True)
         if not frappe.db.exists("UOM", "Unidad"):
-            frappe.new_doc("UOM", uom_name="Unidad").insert(ignore_permissions=True)
+            uom = frappe.new_doc("UOM")
+            uom.update({"uom_name": "Unidad"})
+            uom.insert(ignore_permissions=True)
         
         frappe.db.commit()
         return {"status": "success", "message": f"Environment for company '{company_name}' configured successfully."}
@@ -93,7 +113,6 @@ def setup_company_environment():
         frappe.db.rollback()
         frappe.log_error(title="Company Environment Setup Failed", message=frappe.get_traceback())
         frappe.throw(f"An error occurred during company setup: {str(e)}")
-
 
 # ==============================================================================
 # SCRIPT 2: CREATE TRANSACTIONAL INVOICE
