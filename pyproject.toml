@@ -1,0 +1,26 @@
+# In apps/shop_manager/pyproject.toml
+
+[project]
+name = "shop_manager"
+version = "0.0.1"
+authors = [
+    { name = "Your Name", email = "your-email@example.com" },
+]
+description = "A custom app to manage shops."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+# --- THE CRITICAL FIX ---
+# The module name is simply "shop_manager", which corresponds to the
+# inner "shop_manager" directory that contains your code.
+[tool.flit.module]
+name = "shop_manager"
+
+[build-system]
+requires = ["flit_core<4"]
+build-backend = "flit_core.buildapi"

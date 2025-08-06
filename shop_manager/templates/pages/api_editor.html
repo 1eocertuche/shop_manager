@@ -1,0 +1,57 @@
+<!-- shop_manager/templates/pages/api_editor.html -->
+{% extends "templates/web.html" %}
+
+{% block page_content %}
+<div class="container">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-body">
+                    <h4 class="card-title">API Code Editor</h4>
+                    <div class="form-group">
+                        <label for="api-code">Edit API Code:</label>
+                        <textarea id="api-code" class="form-control" rows="25">{{ api_code }}</textarea>
+                    </div>
+                    <button id="save-btn" class="btn btn-primary">Save Changes</button>
+                    <div id="status-message" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    frappe.ready(function() {
+        // Set up CodeMirror if available
+        if (typeof CodeMirror !== 'undefined') {
+            var editor = CodeMirror.fromTextArea(document.getElementById('api-code'), {
+                mode: 'python',
+                lineNumbers: true,
+                indentUnit: 4,
+                lineWrapping: true,
+                theme: 'default'
+            });
+        }
+        
+        $('#save-btn').click(function() {
+            var api_code = editor ? editor.getValue() : $('#api-code').val();
+            
+            frappe.call({
+                method: 'shop_manager.api.save_api_code',
+                args: {
+                    api_code: api_code
+                },
+                callback: function(r) {
+                    if(r.message && r.message.status === 'success') {
+                        $('#status-message').html('<div class="alert alert-success">' + r.message.message + '</div>');
+                    } else {
+                        $('#status-message').html('<div class="alert alert-danger">Error saving API code.</div>');
+                    }
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}
