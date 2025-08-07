@@ -3,7 +3,7 @@ from frappe.utils import getdate, nowdate, password
 import secrets
 
 # ==============================================================================
-# ENDPOINT 1: SETUP COMPANY AND USER ENVIRONMENT (LÓGICA CORREGIDA)
+# ENDPOINT 1: SETUP COMPANY AND USER ENVIRONMENT (ROL CORREGIDO)
 # ==============================================================================
 @frappe.whitelist()
 def setup_company_and_user():
@@ -14,7 +14,8 @@ def setup_company_and_user():
         abbr = data.get("company_abbr")
         seller_email = data.get("user_email")
 
-        # ... (Toda la lógica de creación de Compañía y Cuentas se mantiene igual) ...
+        # --- Setup de la Compañía y Cuentas ---
+        # (Esta parte no cambia)
         if not frappe.db.exists("Company", company_name):
             company = frappe.new_doc("Company")
             company.update({"company_name": company_name, "abbr": abbr, "country": "Colombia", "default_currency": "COP", "chart_of_accounts": "Colombia PUC Simple"})
@@ -59,38 +60,32 @@ def setup_company_and_user():
         if not frappe.db.exists("UOM", data.get("default_uom")):
             frappe.new_doc("UOM", uom_name=data.get("default_uom")).insert(ignore_permissions=True)
 
-        # --- Creación de Usuario y Credenciales (MÉTODO CORREGIDO) ---
+        # --- Creación de Usuario y Credenciales ---
         api_key, api_secret = None, None
         if not frappe.db.exists("User", seller_email):
             user = frappe.new_doc("User")
             user.update({"email": seller_email, "first_name": data.get("user_first_name"), "last_name": data.get("user_last_name"), "send_welcome_email": 0})
-            user.add_roles("Accounts User", "Purchase User")
             
-            # Generar las claves en texto plano
+            # === LA LÍNEA CORREGIDA ===
+            user.add_roles("Accounts User", "Purchase User", "Stock User") # <-- AÑADIR "Stock User"
+            
+            user.save(ignore_permissions=True)
             api_key = secrets.token_hex(16)
             api_secret = secrets.token_hex(16)
-            
-            # Asignarlas directamente. El método .save() se encargará de encriptar el secreto.
             user.api_key = api_key
             user.api_secret = api_secret
             user.save(ignore_permissions=True)
         else:
-            # Si el usuario ya existe, simplemente obtenemos su clave de API.
-            # El secreto no se puede leer, pero el cliente ya debería tenerlo.
+            # Si el usuario ya existe, debemos asegurarnos de que tenga el rol
+            user = frappe.get_doc("User", seller_email)
+            user.add_roles("Stock User")
+            user.save(ignore_permissions=True)
             api_key = frappe.db.get_value("User", seller_email, "api_key")
             api_secret = "SECRET_OCULTO (El usuario ya existe, use las credenciales existentes)"
 
         frappe.db.commit()
 
-        # Devolvemos el secreto en texto plano para que el cliente pueda usarlo
-        return {
-            "status": "SUCCESS",
-            "message": f"Environment for company '{company_name}' and user '{seller_email}' is ready.",
-            "new_user_credentials": {
-                "api_key": api_key,
-                "api_secret": api_secret
-            }
-        }
+        return {"status": "SUCCESS", "message": f"Environment for company '{company_name}' and user '{seller_email}' is ready.", "new_user_credentials": {"api_key": api_key, "api_secret": api_secret}}
     except Exception as e:
         frappe.db.rollback()
         frappe.log_error(title="Company & User Setup Failed", message=frappe.get_traceback())
