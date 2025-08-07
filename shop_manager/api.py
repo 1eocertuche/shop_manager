@@ -1,16 +1,12 @@
 import frappe
 from frappe.utils import getdate, nowdate, password
-import secrets # <-- Importante: Módulo para generar secretos
+import secrets
 
 # ==============================================================================
-# ENDPOINT 1: SETUP COMPANY AND USER ENVIRONMENT
+# ENDPOINT 1: SETUP COMPANY AND USER ENVIRONMENT (LÓGICA CORREGIDA)
 # ==============================================================================
 @frappe.whitelist()
 def setup_company_and_user():
-    """
-    Crea la Compañía, cuentas, grupos por defecto y el Usuario de Ventas.
-    Devuelve las credenciales de API para el nuevo usuario.
-    """
     data = frappe.local.form_dict
     
     try:
@@ -18,33 +14,27 @@ def setup_company_and_user():
         abbr = data.get("company_abbr")
         seller_email = data.get("user_email")
 
-        # --- Setup de la Compañía y Cuentas ---
-        # (Esta parte del código no cambia y es correcta)
+        # ... (Toda la lógica de creación de Compañía y Cuentas se mantiene igual) ...
         if not frappe.db.exists("Company", company_name):
             company = frappe.new_doc("Company")
             company.update({"company_name": company_name, "abbr": abbr, "country": "Colombia", "default_currency": "COP", "chart_of_accounts": "Colombia PUC Simple"})
             company.insert(ignore_permissions=True)
-        
         company_doc = frappe.get_doc("Company", company_name)
         asset_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Asset", "is_group": 1})
         income_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Income", "is_group": 1})
         expense_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Expense", "is_group": 1})
-        
         receivable_account_name = f"Deudores - {abbr}"
         if not frappe.db.exists("Account", receivable_account_name):
             frappe.new_doc("Account", account_name="Deudores", parent_account=asset_root, company=company_name, account_type="Receivable").insert(ignore_permissions=True)
         company_doc.default_receivable_account = receivable_account_name
-        
         income_account_name = f"Ventas - {abbr}"
         if not frappe.db.exists("Account", income_account_name):
             frappe.new_doc("Account", account_name="Ventas", parent_account=income_root, company=company_name, account_type="Income Account").insert(ignore_permissions=True)
         company_doc.default_income_account = income_account_name
-        
         stock_asset_account_name = f"Activos de inventario - {abbr}"
         if not frappe.db.exists("Account", stock_asset_account_name):
             frappe.new_doc("Account", account_name="Activos de inventario", parent_account=asset_root, company=company_name, account_type="Stock").insert(ignore_permissions=True)
         company_doc.default_inventory_account = stock_asset_account_name
-        
         cogs_account_name = f"Costos de los bienes vendidos - {abbr}"
         if not frappe.db.exists("Account", cogs_account_name):
             frappe.new_doc("Account", account_name="Costos de los bienes vendidos", parent_account=expense_root, company=company_name, is_group=1, account_type="Cost of Goods Sold").insert(ignore_permissions=True)
@@ -57,9 +47,7 @@ def setup_company_and_user():
             current_asset_account = asset_root
         if not frappe.db.exists("Account", {"account_name": "Caja General", "company": company_name}):
             frappe.new_doc("Account", account_name="Caja General", parent_account=current_asset_account, company=company_name, account_type="Cash").insert(ignore_permissions=True)
-
         company_doc.save(ignore_permissions=True)
-        
         if not frappe.db.exists("Warehouse", {"warehouse_name": f"Bodega tienda - {abbr}"}):
             frappe.new_doc("Warehouse", warehouse_name=f"Bodega tienda - {abbr}", company=company_name).insert(ignore_permissions=True)
         if not frappe.db.exists("Item Group", data.get("default_item_group")):
@@ -71,30 +59,30 @@ def setup_company_and_user():
         if not frappe.db.exists("UOM", data.get("default_uom")):
             frappe.new_doc("UOM", uom_name=data.get("default_uom")).insert(ignore_permissions=True)
 
-        # --- Creación de Usuario y Credenciales (LÓGICA CORREGIDA) ---
+        # --- Creación de Usuario y Credenciales (MÉTODO CORREGIDO) ---
         api_key, api_secret = None, None
         if not frappe.db.exists("User", seller_email):
-            # 1. Crear el usuario
             user = frappe.new_doc("User")
             user.update({"email": seller_email, "first_name": data.get("user_first_name"), "last_name": data.get("user_last_name"), "send_welcome_email": 0})
             user.add_roles("Accounts User", "Purchase User")
-            user.save(ignore_permissions=True) # Guardar el usuario primero
-
-            # 2. Generar las claves manualmente
-            api_key = secrets.token_hex(16)
-            api_secret = secrets.token_hex(16) # Este es el secreto en texto plano que devolveremos
             
-            # 3. Guardar las claves en el documento del usuario (el secreto se encripta)
+            # Generar las claves en texto plano
+            api_key = secrets.token_hex(16)
+            api_secret = secrets.token_hex(16)
+            
+            # Asignarlas directamente. El método .save() se encargará de encriptar el secreto.
             user.api_key = api_key
-            user.api_secret = password.encrypt(api_secret)
+            user.api_secret = api_secret
             user.save(ignore_permissions=True)
         else:
-            keys = frappe.db.get_value("User", seller_email, ["api_key"], as_dict=True)
-            api_key = keys.api_key if keys else None
+            # Si el usuario ya existe, simplemente obtenemos su clave de API.
+            # El secreto no se puede leer, pero el cliente ya debería tenerlo.
+            api_key = frappe.db.get_value("User", seller_email, "api_key")
             api_secret = "SECRET_OCULTO (El usuario ya existe, use las credenciales existentes)"
 
         frappe.db.commit()
 
+        # Devolvemos el secreto en texto plano para que el cliente pueda usarlo
         return {
             "status": "SUCCESS",
             "message": f"Environment for company '{company_name}' and user '{seller_email}' is ready.",
@@ -108,12 +96,12 @@ def setup_company_and_user():
         frappe.log_error(title="Company & User Setup Failed", message=frappe.get_traceback())
         frappe.throw(f"An error occurred during setup: {str(e)}")
 
-
 # ==============================================================================
 # ENDPOINT 2: CREATE SALES INVOICE AND PAYMENT (Sin cambios)
 # ==============================================================================
 @frappe.whitelist()
 def create_sales_invoice_with_payment():
+    # Este código no necesita cambios.
     data = frappe.local.form_dict
     try:
         company_name = frappe.db.get_value("Company", {"abbr": data.get("company_abbr")}, "name")
