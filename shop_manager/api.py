@@ -3,7 +3,7 @@ from frappe.utils import getdate, nowdate
 import secrets
 
 # ==============================================================================
-# ENDPOINT 1: SETUP COMPANY AND USER (FINAL IDEMPOTENT VERSION)
+# ENDPOINT 1: SETUP COMPANY AND USER (FINAL VERSION)
 # ==============================================================================
 @frappe.whitelist()
 def setup_company_and_user():
@@ -73,9 +73,8 @@ def setup_company_and_user():
         if not frappe.db.exists("UOM", data.get("default_uom")):
             uom = frappe.new_doc("UOM"); uom.uom_name = data.get("default_uom"); uom.insert(ignore_permissions=True)
             
-        # === FINAL EAFP (Easier to Ask Forgiveness) FIX FOR USER CREATION ===
+        # === FINAL EAFP FIX (REMOVED UNNECESSARY ROLLBACK) ===
         try:
-            # Try to create the user directly
             user = frappe.new_doc("User")
             user.email = user_email
             user.first_name = data.get("user_first_name")
@@ -84,7 +83,6 @@ def setup_company_and_user():
             user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
             user.insert(ignore_permissions=True)
             
-            # Generate API keys ONLY for a brand new user
             api_key = secrets.token_hex(16)
             api_secret = secrets.token_hex(16)
             user.api_key = api_key
@@ -92,14 +90,12 @@ def setup_company_and_user():
             user.save(ignore_permissions=True)
 
         except frappe.exceptions.DuplicateEntryError:
-            # If user already exists, this block will run.
-            frappe.db.rollback() # Clear the failed insert attempt
+            # The rollback was here. It has been removed.
             user = frappe.get_doc("User", user_email)
             user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
             user.save(ignore_permissions=True)
 
         frappe.db.commit()
-        # Always return the latest API keys for this user
         user_keys = frappe.db.get_value("User", user_email, ["api_key", "api_secret"], as_dict=True)
         return {"status": "SUCCESS", "message": f"Environment for company '{company_name}' and user '{user_email}' is ready.", "new_user_credentials": user_keys}
         
@@ -108,6 +104,7 @@ def setup_company_and_user():
         frappe.log_error(title="Company & User Setup Failed", message=frappe.get_traceback())
         frappe.throw(f"An error occurred during setup: {str(e)}")
 
+# (The rest of the file remains the same)
 # ==============================================================================
 # ENDPOINT 2: CREATE SALES INVOICE AND PAYMENT (Preserved and Corrected)
 # ==============================================================================
