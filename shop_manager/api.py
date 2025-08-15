@@ -113,8 +113,9 @@ def setup_company_and_user():
             uom.uom_name = data.get("default_uom")
             uom.insert(ignore_permissions=True)
             
-        # --- Creación de Usuario y Credenciales (FINAL ROBUST VERSION) ---
+        # === THIS IS THE CRUCIAL FIX FOR THE DUPLICATE USER ERROR ===
         if not frappe.db.exists("User", user_email):
+            # Create the user only if they do not exist
             user = frappe.new_doc("User")
             user.email = user_email
             user.first_name = data.get("user_first_name")
@@ -129,6 +130,7 @@ def setup_company_and_user():
             user.set("api_secret", api_secret)
             user.save(ignore_permissions=True)
         else:
+            # If the user already exists, just update their roles
             user = frappe.get_doc("User", user_email)
             user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
             user.save(ignore_permissions=True)
@@ -142,6 +144,7 @@ def setup_company_and_user():
         frappe.log_error(title="Company & User Setup Failed", message=frappe.get_traceback())
         frappe.throw(f"An error occurred during setup: {str(e)}")
 
+# (The rest of the file remains the same)
 # ==============================================================================
 # ENDPOINT 2: CREATE SALES INVOICE AND PAYMENT (Preserved and Corrected)
 # ==============================================================================
@@ -196,7 +199,6 @@ def create_sales_invoice_with_payment():
         pe.paid_amount = si.grand_total
         pe.received_amount = si.grand_total
         pe.paid_to = cash_account
-        # === THIS IS THE LINE THAT WAS PREVIOUSLY CUT OFF AND IS NOW FIXED ===
         pe.append("references", {"reference_doctype": "Sales Invoice", "reference_name": si.name, "allocated_amount": si.grand_total})
         pe.submit()
         
