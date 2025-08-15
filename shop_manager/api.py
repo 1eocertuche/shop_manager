@@ -14,7 +14,6 @@ def setup_company_and_user():
         abbr = data.get("company_abbr")
         user_email = data.get("user_email")
 
-        # --- Setup de la Compañía y Cuentas ---
         if not frappe.db.exists("Company", company_name):
             company = frappe.new_doc("Company"); company.company_name = company_name; company.abbr = abbr; company.country = "Colombia"; company.default_currency = "COP"; company.chart_of_accounts = "Colombia PUC Simple"; company.insert(ignore_permissions=True)
         
@@ -188,15 +187,7 @@ def create_purchase_invoice_with_payment():
         return { "status": "SUCCESS", "message": "Purchase Invoice and Payment created successfully.", "purchase_invoice": pi.name, "payment_entry": pe.name }
         
     except Exception as e:
-        frappe.db.rollback(); frappe.log_error(title="Purchase Invoice Cycle Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during the purchase invoice cycle: {str(e)}")```
-
-### Final `curl` Command for a Paid Purchase Invoice
-
-Now, you will use a new command that calls the new `create_purchase_invoice_with_payment` endpoint. The data you send is exactly the same; only the function name in the URL changes.
-
-**Instructions:**
-*   You can continue to use the **Admin API Keys** for this test.
-*   Paste the command below into [https://www.reqbin.com/curl](https://www.reqbin.com/curl), import, and send.
-
-```curl
-curl -X POST "https://aitender.v.frappe.cloud/api/method/shop_manager.api.create_purchase_invoice_with_payment" -H "Authorization: token 4f74b9b36de6ecc:510870097cb931c" -H "X-Frappe-Site-Name: aitender.v.frappe.cloud" -d "company_abbr=TdaBrr" -d "supplier_name=Proveedor Principal" -d "supplier_group=Todos los grupos de proveedores" -d "item_code=PAN-002" -d "item_name=Pan Integral" -d "item_group=Todos los grupos de productos" -d "uom_name=Unidad" -d "item_qty=25" -d "item_rate=1100" -d "posting_date=2025-08-11" -d "due_date=2025-09-10"
+        frappe.db.rollback()
+        frappe.log_error(title="Purchase Invoice Cycle Failed", message=frappe.get_traceback())
+        # THIS IS THE LINE THAT WAS PREVIOUSLY BROKEN AND IS NOW FIXED
+        frappe.throw(f"An error occurred during the purchase invoice cycle: {str(e)}")
