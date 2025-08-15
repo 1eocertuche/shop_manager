@@ -125,4 +125,59 @@ def create_sales_invoice_with_payment():
             customer = frappe.new_doc("Customer"); customer.customer_name = data.get("customer_name"); customer.customer_group = data.get("customer_group"); customer.insert(ignore_permissions=True)
             
         if not frappe.db.exists("Item", data.get("item_code")):
-            item = frappe.new_doc("Item"); item.item_code = data.get("item_code"); item.item_name = data.get("item_name"); item.item_group = data.get("item_group"); item.stock_uom = data.get("uom
+            item = frappe.new_doc("Item"); item.item_code = data.get("item_code"); item.item_name = data.get("item_name"); item.item_group = data.get("item_group"); item.stock_uom = data.get("uom_name"); item.is_stock_item = 1; item.insert(ignore_permissions=True)
+            
+        warehouse_name = f"Bodega tienda - {data.get('company_abbr')}"
+        
+        stock_entry = frappe.new_doc("Stock Entry"); stock_entry.stock_entry_type = "Material Receipt"; stock_entry.company = company_name
+        stock_entry.append("items", {"item_code": data.get("item_code"), "qty": data.get("item_qty", 1) * 10, "t_warehouse": warehouse_name, "basic_rate": data.get("item_rate", 1) * 0.5})
+        stock_entry.submit()
+        
+        si = frappe.new_doc("Sales Invoice"); si.customer = data.get("customer_name"); si.company = company_name; si.posting_date = getdate(data.get("posting_date", nowdate())); si.update_stock = 1
+        si.append("items", {"item_code": data.get("item_code"), "qty": data.get("item_qty"), "rate": data.get("item_rate"), "warehouse": warehouse_name, "income_account": company_doc.default_income_account})
+        si.submit()
+        
+        cash_account = frappe.db.get_value("Account", {"account_name": "Caja General", "company": company_name})
+        
+        pe = frappe.new_doc("Payment Entry"); pe.payment_type = "Receive"; pe.party_type = "Customer"; pe.party = data.get("customer_name"); pe.company = company_name; pe.paid_amount = si.grand_total; pe.received_amount = si.grand_total; pe.paid_to = cash_account
+        pe.append("references", {"reference_doctype": "Sales Invoice", "reference_name": si.name, "allocated_amount": si.grand_total})
+        pe.submit()
+        
+        frappe.db.commit()
+        return { "status": "SUCCESS", "message": "Sales cycle created successfully.", "sales_invoice": si.name, "payment_entry": pe.name }
+        
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(title="Sales Invoice Cycle Failed", message=frappe.get_traceback())
+        frappe.throw(f"An error occurred during the sales invoice cycle: {str(e)}")
+
+# ==============================================================================
+# ENDPOINT 3: CREATE PURCHASE INVOICE (New and Corrected)
+# ==============================================================================
+@frappe.whitelist()
+def create_purchase_invoice():
+    data = frappe.local.form_dict
+    try:
+        company_name = frappe.db.get_value("Company", {"abbr": data.get("company_abbr")}, "name")
+        if not company_name:
+            frappe.throw(f"Company with abbreviation '{data.get('company_abbr')}' not found.")
+            
+        if not frappe.db.exists("Supplier", data.get("supplier_name")):
+            s = frappe.new_doc("Supplier"); s.supplier_name = data.get("supplier_name"); s.supplier_group = data.get("supplier_group"); s.insert(ignore_permissions=True)
+            
+        if not frappe.db.exists("Item", data.get("item_code")):
+            i = frappe.new_doc("Item"); i.item_code = data.get("item_code"); i.item_name = data.get("item_name"); i.item_group = data.get("item_group"); i.stock_uom = data.get("uom_name"); i.is_stock_item = 1; i.insert(ignore_permissions=True)
+            
+        warehouse_name = f"Almacén Principal - {data.get('company_abbr')}"
+        
+        pi = frappe.new_doc("Purchase Invoice"); pi.company = company_name; pi.supplier = data.get("supplier_name"); pi.posting_date = getdate(data.get("posting_date", nowdate())); pi.due_date = getdate(data.get("due_date")); pi.update_stock = 1; pi.set_posting_time = 1
+        pi.append("items", { "item_code": data.get("item_code"), "qty": data.get("item_qty"), "rate": data.get("item_rate"), "warehouse": warehouse_name, })
+        pi.submit()
+        
+        frappe.db.commit()
+        return { "status": "SUCCESS", "message": "Purchase Invoice created and submitted successfully.", "purchase_invoice": pi.name }
+        
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(title="Purchase Invoice Creation Failed", message=frappe.get_traceback())
+        frappe.throw(f"An error occurred during purchase invoice creation: {str(e)}")
