@@ -3,7 +3,7 @@ from frappe.utils import getdate, nowdate
 import secrets
 
 # ==============================================================================
-# ENDPOINT 1: SETUP COMPANY AND USER (FINAL VERSION)
+# ENDPOINT 1: SETUP COMPANY AND USER (FINAL IDEMPOTENT VERSION)
 # ==============================================================================
 @frappe.whitelist()
 def setup_company_and_user():
@@ -16,13 +16,7 @@ def setup_company_and_user():
 
         # --- Setup de la Compañía y Cuentas ---
         if not frappe.db.exists("Company", company_name):
-            company = frappe.new_doc("Company")
-            company.company_name = company_name
-            company.abbr = abbr
-            company.country = "Colombia"
-            company.default_currency = "COP"
-            company.chart_of_accounts = "Colombia PUC Simple"
-            company.insert(ignore_permissions=True)
+            company = frappe.new_doc("Company"); company.company_name = company_name; company.abbr = abbr; company.country = "Colombia"; company.default_currency = "COP"; company.chart_of_accounts = "Colombia PUC Simple"; company.insert(ignore_permissions=True)
         
         company_doc = frappe.get_doc("Company", company_name)
         
@@ -73,26 +67,13 @@ def setup_company_and_user():
         if not frappe.db.exists("UOM", data.get("default_uom")):
             uom = frappe.new_doc("UOM"); uom.uom_name = data.get("default_uom"); uom.insert(ignore_permissions=True)
             
-        # === FINAL EAFP FIX (REMOVED UNNECESSARY ROLLBACK) ===
         try:
-            user = frappe.new_doc("User")
-            user.email = user_email
-            user.first_name = data.get("user_first_name")
-            user.last_name = data.get("user_last_name")
-            user.send_welcome_email = 0
-            user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
-            user.insert(ignore_permissions=True)
-            
-            api_key = secrets.token_hex(16)
-            api_secret = secrets.token_hex(16)
-            user.api_key = api_key
-            user.set("api_secret", api_secret)
-            user.save(ignore_permissions=True)
-
+            user = frappe.new_doc("User"); user.email = user_email; user.first_name = data.get("user_first_name"); user.last_name = data.get("user_last_name"); user.send_welcome_email = 0; user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User"); user.insert(ignore_permissions=True)
+            api_key = secrets.token_hex(16); api_secret = secrets.token_hex(16); user.api_key = api_key; user.set("api_secret", api_secret); user.save(ignore_permissions=True)
         except frappe.exceptions.DuplicateEntryError:
-            # The rollback was here. It has been removed.
-            user = frappe.get_doc("User", user_email)
-            user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
+            user = frappe.get_doc("User", user_email); user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
+            if not user.api_key:
+                api_key = secrets.token_hex(16); api_secret = secrets.token_hex(16); user.api_key = api_key; user.set("api_secret", api_secret)
             user.save(ignore_permissions=True)
 
         frappe.db.commit()
@@ -100,11 +81,8 @@ def setup_company_and_user():
         return {"status": "SUCCESS", "message": f"Environment for company '{company_name}' and user '{user_email}' is ready.", "new_user_credentials": user_keys}
         
     except Exception as e:
-        frappe.db.rollback()
-        frappe.log_error(title="Company & User Setup Failed", message=frappe.get_traceback())
-        frappe.throw(f"An error occurred during setup: {str(e)}")
+        frappe.db.rollback(); frappe.log_error(title="Company & User Setup Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during setup: {str(e)}")
 
-# (The rest of the file remains the same)
 # ==============================================================================
 # ENDPOINT 2: CREATE SALES INVOICE AND PAYMENT (Preserved and Corrected)
 # ==============================================================================
@@ -144,12 +122,10 @@ def create_sales_invoice_with_payment():
         return { "status": "SUCCESS", "message": "Sales cycle created successfully.", "sales_invoice": si.name, "payment_entry": pe.name }
         
     except Exception as e:
-        frappe.db.rollback()
-        frappe.log_error(title="Sales Invoice Cycle Failed", message=frappe.get_traceback())
-        frappe.throw(f"An error occurred during the sales invoice cycle: {str(e)}")
+        frappe.db.rollback(); frappe.log_error(title="Sales Invoice Cycle Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during the sales invoice cycle: {str(e)}")
 
 # ==============================================================================
-# ENDPOINT 3: CREATE PURCHASE INVOICE (New and Corrected)
+# ENDPOINT 3: CREATE PURCHASE INVOICE (Unpaid)
 # ==============================================================================
 @frappe.whitelist()
 def create_purchase_invoice():
@@ -175,6 +151,52 @@ def create_purchase_invoice():
         return { "status": "SUCCESS", "message": "Purchase Invoice created and submitted successfully.", "purchase_invoice": pi.name }
         
     except Exception as e:
-        frappe.db.rollback()
-        frappe.log_error(title="Purchase Invoice Creation Failed", message=frappe.get_traceback())
-        frappe.throw(f"An error occurred during purchase invoice creation: {str(e)}")
+        frappe.db.rollback(); frappe.log_error(title="Purchase Invoice Creation Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during purchase invoice creation: {str(e)}")
+
+# ==============================================================================
+# ENDPOINT 4: CREATE PURCHASE INVOICE WITH PAYMENT (NEW)
+# ==============================================================================
+@frappe.whitelist()
+def create_purchase_invoice_with_payment():
+    data = frappe.local.form_dict
+    try:
+        company_name = frappe.db.get_value("Company", {"abbr": data.get("company_abbr")}, "name")
+        if not company_name:
+            frappe.throw(f"Company with abbreviation '{data.get('company_abbr')}' not found.")
+            
+        if not frappe.db.exists("Supplier", data.get("supplier_name")):
+            s = frappe.new_doc("Supplier"); s.supplier_name = data.get("supplier_name"); s.supplier_group = data.get("supplier_group"); s.insert(ignore_permissions=True)
+            
+        if not frappe.db.exists("Item", data.get("item_code")):
+            i = frappe.new_doc("Item"); i.item_code = data.get("item_code"); i.item_name = data.get("item_name"); i.item_group = data.get("item_group"); i.stock_uom = data.get("uom_name"); i.is_stock_item = 1; i.insert(ignore_permissions=True)
+            
+        warehouse_name = f"Almacén Principal - {data.get('company_abbr')}"
+        
+        # Step 1: Create and Submit the Purchase Invoice
+        pi = frappe.new_doc("Purchase Invoice"); pi.company = company_name; pi.supplier = data.get("supplier_name"); pi.posting_date = getdate(data.get("posting_date", nowdate())); pi.due_date = getdate(data.get("due_date")); pi.update_stock = 1; pi.set_posting_time = 1
+        pi.append("items", { "item_code": data.get("item_code"), "qty": data.get("item_qty"), "rate": data.get("item_rate"), "warehouse": warehouse_name, })
+        pi.submit()
+        
+        # Step 2: Create and Submit a Payment Entry against the new invoice
+        cash_account = frappe.db.get_value("Account", {"account_name": "Caja General", "company": company_name})
+        
+        pe = frappe.new_doc("Payment Entry"); pe.payment_type = "Pay"; pe.party_type = "Supplier"; pe.party = data.get("supplier_name"); pe.company = company_name; pe.paid_amount = pi.grand_total; pe.paid_from = cash_account
+        pe.append("references", {"reference_doctype": "Purchase Invoice", "reference_name": pi.name, "allocated_amount": pi.grand_total})
+        pe.submit()
+        
+        frappe.db.commit()
+        return { "status": "SUCCESS", "message": "Purchase Invoice and Payment created successfully.", "purchase_invoice": pi.name, "payment_entry": pe.name }
+        
+    except Exception as e:
+        frappe.db.rollback(); frappe.log_error(title="Purchase Invoice Cycle Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during the purchase invoice cycle: {str(e)}")```
+
+### Final `curl` Command for a Paid Purchase Invoice
+
+Now, you will use a new command that calls the new `create_purchase_invoice_with_payment` endpoint. The data you send is exactly the same; only the function name in the URL changes.
+
+**Instructions:**
+*   You can continue to use the **Admin API Keys** for this test.
+*   Paste the command below into [https://www.reqbin.com/curl](https://www.reqbin.com/curl), import, and send.
+
+```curl
+curl -X POST "https://aitender.v.frappe.cloud/api/method/shop_manager.api.create_purchase_invoice_with_payment" -H "Authorization: token 4f74b9b36de6ecc:510870097cb931c" -H "X-Frappe-Site-Name: aitender.v.frappe.cloud" -d "company_abbr=TdaBrr" -d "supplier_name=Proveedor Principal" -d "supplier_group=Todos los grupos de proveedores" -d "item_code=PAN-002" -d "item_name=Pan Integral" -d "item_group=Todos los grupos de productos" -d "uom_name=Unidad" -d "item_qty=25" -d "item_rate=1100" -d "posting_date=2025-08-11" -d "due_date=2025-09-10"
