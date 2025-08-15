@@ -72,7 +72,7 @@ def setup_company_and_user(company_name, company_abbr, user_email, user_first_na
             user.update({"email": user_email, "first_name": user_first_name, "last_name": user_last_name, "send_welcome_email": 0})
             user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
             user.save(ignore_permissions=True)
-            # Regenerate keys for the user associated with this company
+            
             api_key = secrets.token_hex(16)
             api_secret = secrets.token_hex(16)
             user.api_key = api_key
@@ -80,7 +80,6 @@ def setup_company_and_user(company_name, company_abbr, user_email, user_first_na
             user.save(ignore_permissions=True)
         
         frappe.db.commit()
-        # Return the newly generated keys for the user
         user_keys = frappe.db.get_value("User", user_email, ["api_key", "api_secret"], as_dict=True)
         return {"status": "SUCCESS", "message": f"Environment for company '{company_name}' and user '{user_email}' is ready.", "new_user_credentials": user_keys}
 
@@ -131,26 +130,5 @@ def create_purchase_invoice(company_abbr, supplier_name, supplier_group, item_co
     except Exception as e:
         frappe.db.rollback()
         frappe.log_error(title="Purchase Invoice Creation Failed", message=frappe.get_traceback())
-        frappe.throw(f"An error occurred during purchase invoice creation: {str(e)}")```
-
-### Final `curl` Commands
-
-Because the `api.py` script is now simpler, the `curl` commands also become simpler and more reliable.
-
-#### Final Step 1: Create the Company
-
-This command sends the data as URL-encoded form data, which is the most compatible method.
-
-```dos
-curl -L -X POST "https://aitender.v.frappe.cloud/api/method/shop_manager.api.setup_company_and_user" ^
--H "Authorization: token 4f74b9b36de6ecc:510870097cb931c" ^
--H "X-Frappe-Site-Name: aitender.v.frappe.cloud" ^
--d "company_name=Tiendota de Barrio" ^
--d "company_abbr=TdaBrr" ^
--d "user_email=userito@tiend.ai" ^
--d "user_first_name=Tenderaza" ^
--d "user_last_name=Barrial" ^
--d "default_item_group=Todos los grupos de productos" ^
--d "default_customer_group=Individual" ^
--d "default_supplier_group=Todos los grupos de proveedores" ^
--d "default_uom=Unidad"
+        # The syntax error was here. The "```" has been removed.
+        frappe.throw(f"An error occurred during purchase invoice creation: {str(e)}")
