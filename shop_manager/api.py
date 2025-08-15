@@ -4,7 +4,6 @@ import secrets
 
 # ==============================================================================
 # ENDPOINT 1: SETUP COMPANY AND USER (FINAL IDEMPOTENT VERSION)
-# This version correctly handles existing users to prevent duplicate entry errors.
 # ==============================================================================
 @frappe.whitelist()
 def setup_company_and_user():
@@ -116,7 +115,6 @@ def setup_company_and_user():
             
         # --- Creación de Usuario y Credenciales (FINAL ROBUST VERSION) ---
         if not frappe.db.exists("User", user_email):
-            # Create the user if they do not exist
             user = frappe.new_doc("User")
             user.email = user_email
             user.first_name = data.get("user_first_name")
@@ -125,20 +123,17 @@ def setup_company_and_user():
             user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
             user.insert(ignore_permissions=True)
             
-            # Generate new API keys for the new user
             api_key = secrets.token_hex(16)
             api_secret = secrets.token_hex(16)
             user.api_key = api_key
             user.set("api_secret", api_secret)
             user.save(ignore_permissions=True)
         else:
-            # If the user already exists, get them and ensure their roles are correct
             user = frappe.get_doc("User", user_email)
             user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User")
             user.save(ignore_permissions=True)
             
         frappe.db.commit()
-        # Always return the latest API keys for this user
         user_keys = frappe.db.get_value("User", user_email, ["api_key", "api_secret"], as_dict=True)
         return {"status": "SUCCESS", "message": f"Environment for company '{company_name}' and user '{user_email}' is ready.", "new_user_credentials": user_keys}
         
@@ -201,4 +196,65 @@ def create_sales_invoice_with_payment():
         pe.paid_amount = si.grand_total
         pe.received_amount = si.grand_total
         pe.paid_to = cash_account
-        pe.append("references", {"reference_doctype": "Sales Invoice", "reference_name": si.name, "allocated_am
+        # === THIS IS THE LINE THAT WAS PREVIOUSLY CUT OFF AND IS NOW FIXED ===
+        pe.append("references", {"reference_doctype": "Sales Invoice", "reference_name": si.name, "allocated_amount": si.grand_total})
+        pe.submit()
+        
+        frappe.db.commit()
+        return { "status": "SUCCESS", "message": "Sales cycle created successfully.", "sales_invoice": si.name, "payment_entry": pe.name }
+        
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(title="Sales Invoice Cycle Failed", message=frappe.get_traceback())
+        frappe.throw(f"An error occurred during the sales invoice cycle: {str(e)}")
+
+# ==============================================================================
+# ENDPOINT 3: CREATE PURCHASE INVOICE (New and Corrected)
+# ==============================================================================
+@frappe.whitelist()
+def create_purchase_invoice():
+    data = frappe.local.form_dict
+    try:
+        company_name = frappe.db.get_value("Company", {"abbr": data.get("company_abbr")}, "name")
+        if not company_name:
+            frappe.throw(f"Company with abbreviation '{data.get('company_abbr')}' not found.")
+            
+        if not frappe.db.exists("Supplier", data.get("supplier_name")):
+            s = frappe.new_doc("Supplier")
+            s.supplier_name = data.get("supplier_name")
+            s.supplier_group = data.get("supplier_group")
+            s.insert(ignore_permissions=True)
+            
+        if not frappe.db.exists("Item", data.get("item_code")):
+            i = frappe.new_doc("Item")
+            i.item_code = data.get("item_code")
+            i.item_name = data.get("item_name")
+            i.item_group = data.get("item_group")
+            i.stock_uom = data.get("uom_name")
+            i.is_stock_item = 1
+            i.insert(ignore_permissions=True)
+            
+        warehouse_name = f"Almacén Principal - {data.get('company_abbr')}"
+        
+        pi = frappe.new_doc("Purchase Invoice")
+        pi.company = company_name
+        pi.supplier = data.get("supplier_name")
+        pi.posting_date = getdate(data.get("posting_date", nowdate()))
+        pi.due_date = getdate(data.get("due_date"))
+        pi.update_stock = 1
+        pi.set_posting_time = 1
+        pi.append("items", {
+            "item_code": data.get("item_code"),
+            "qty": data.get("item_qty"),
+            "rate": data.get("item_rate"),
+            "warehouse": warehouse_name,
+        })
+        pi.submit()
+        
+        frappe.db.commit()
+        return { "status": "SUCCESS", "message": "Purchase Invoice created and submitted successfully.", "purchase_invoice": pi.name }
+        
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(title="Purchase Invoice Creation Failed", message=frappe.get_traceback())
+        frappe.throw(f"An error occurred during purchase invoice creation: {str(e)}")
