@@ -153,7 +153,7 @@ def create_purchase_invoice():
         frappe.db.rollback(); frappe.log_error(title="Purchase Invoice Creation Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during purchase invoice creation: {str(e)}")
 
 # ==============================================================================
-# ENDPOINT 4: CREATE PURCHASE INVOICE WITH PAYMENT (NEW)
+# ENDPOINT 4: CREATE PURCHASE INVOICE WITH PAYMENT (FINAL CORRECTED VERSION)
 # ==============================================================================
 @frappe.whitelist()
 def create_purchase_invoice_with_payment():
@@ -171,15 +171,23 @@ def create_purchase_invoice_with_payment():
             
         warehouse_name = f"Almacén Principal - {data.get('company_abbr')}"
         
-        # Step 1: Create and Submit the Purchase Invoice
         pi = frappe.new_doc("Purchase Invoice"); pi.company = company_name; pi.supplier = data.get("supplier_name"); pi.posting_date = getdate(data.get("posting_date", nowdate())); pi.due_date = getdate(data.get("due_date")); pi.update_stock = 1; pi.set_posting_time = 1
         pi.append("items", { "item_code": data.get("item_code"), "qty": data.get("item_qty"), "rate": data.get("item_rate"), "warehouse": warehouse_name, })
         pi.submit()
         
-        # Step 2: Create and Submit a Payment Entry against the new invoice
         cash_account = frappe.db.get_value("Account", {"account_name": "Caja General", "company": company_name})
         
-        pe = frappe.new_doc("Payment Entry"); pe.payment_type = "Pay"; pe.party_type = "Supplier"; pe.party = data.get("supplier_name"); pe.company = company_name; pe.paid_amount = pi.grand_total; pe.paid_from = cash_account
+        # === FINAL FIX IS HERE ===
+        pe = frappe.new_doc("Payment Entry")
+        pe.payment_type = "Pay"
+        pe.party_type = "Supplier"
+        pe.party = data.get("supplier_name")
+        pe.company = company_name
+        pe.paid_amount = pi.grand_total
+        pe.paid_from = cash_account
+        # This next line is the crucial addition
+        pe.received_amount = pi.grand_total # In a Pay entry, this sets the amount in the company's base currency.
+        
         pe.append("references", {"reference_doctype": "Purchase Invoice", "reference_name": pi.name, "allocated_amount": pi.grand_total})
         pe.submit()
         
@@ -187,7 +195,4 @@ def create_purchase_invoice_with_payment():
         return { "status": "SUCCESS", "message": "Purchase Invoice and Payment created successfully.", "purchase_invoice": pi.name, "payment_entry": pe.name }
         
     except Exception as e:
-        frappe.db.rollback()
-        frappe.log_error(title="Purchase Invoice Cycle Failed", message=frappe.get_traceback())
-        # THIS IS THE LINE THAT WAS PREVIOUSLY BROKEN AND IS NOW FIXED
-        frappe.throw(f"An error occurred during the purchase invoice cycle: {str(e)}")
+        frappe.db.rollback(); frappe.log_error(title="Purchase Invoice Cycle Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during the purchase invoice cycle: {str(e)}")
