@@ -1,5 +1,5 @@
 import frappe
-import json # <--- IMPORT THE JSON LIBRARY
+import json
 from frappe.utils import getdate, nowdate
 import secrets
 
@@ -15,18 +15,31 @@ def get_company_by_abbr(abbr):
     return company_name
 
 # ==============================================================================
-# ENDPOINT 1: SETUP COMPANY AND USER ENVIRONMENT (FINAL CORRECTED VERSION)
+# UTILITY FUNCTION TO GET REQUEST DATA ROBUSTLY
+# ==============================================================================
+def get_request_data():
+    # This is the final, robust solution.
+    # It tries to read raw JSON data first.
+    # If the raw data is empty, it falls back to the form dictionary.
+    if frappe.request.data:
+        return json.loads(frappe.request.data)
+    return frappe.form_dict
+
+# ==============================================================================
+# ENDPOINT 1: SETUP COMPANY AND USER ENVIRONMENT (FINAL ROBUST VERSION)
 # ==============================================================================
 @frappe.whitelist()
 def setup_company_and_user():
-    # === THE FINAL BUG FIX ===
-    # Read the raw request data and parse it as JSON
-    data = json.loads(frappe.request.data)
+    # === THE FINAL, ROBUST FIX ===
+    data = get_request_data()
     
     try:
         company_name = data.get("company_name")
         abbr = data.get("company_abbr")
         user_email = data.get("user_email")
+
+        if not company_name:
+             frappe.throw("'company_name' not found in request data. Please check your JSON payload.")
 
         # Part 1: Create Company if it doesn't exist
         if not frappe.db.exists("Company", company_name):
@@ -41,16 +54,14 @@ def setup_company_and_user():
             company.insert(ignore_permissions=True)
         
         company_doc = frappe.get_doc("Company", company_name)
-
+        
         # ... (The rest of the function remains unchanged)
         
-        # Part 2: Discover Root Accounts
         asset_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Asset", "is_group": 1})
         income_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Income", "is_group": 1})
         expense_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Expense", "is_group": 1})
         payable_root = frappe.db.get_value("Account", {"company": company_name, "account_type": "Payable", "is_group": 1})
 
-        # Part 3: Setup Essential Accounts
         receivable_account_name = f"Deudores - {abbr}"
         if not frappe.db.exists("Account", receivable_account_name):
             frappe.new_doc("Account", {"account_name": "Deudores", "parent_account": asset_root, "company": company_name, "account_type": "Receivable"}).insert(ignore_permissions=True)
@@ -85,7 +96,6 @@ def setup_company_and_user():
 
         company_doc.save(ignore_permissions=True)
 
-        # Part 4: Setup Warehouses and Default Groups
         if not frappe.db.exists("Warehouse", f"Almacén Principal - {abbr}"):
             frappe.new_doc("Warehouse", {"warehouse_name": f"Almacén Principal - {abbr}", "company": company_name, "is_group": 0}).insert(ignore_permissions=True)
         if not frappe.db.exists("Item Group", data.get("default_item_group")):
@@ -97,7 +107,6 @@ def setup_company_and_user():
         if not frappe.db.exists("UOM", data.get("default_uom")):
             frappe.new_doc("UOM", {"uom_name": data.get("default_uom")}).insert(ignore_permissions=True)
 
-        # Part 5: Create User and API Credentials
         api_key, api_secret = None, None
         if not frappe.db.exists("User", user_email):
             user = frappe.new_doc("User")
@@ -127,17 +136,16 @@ def setup_company_and_user():
 
 
 # ==============================================================================
-# ENDPOINT 2: CREATE PURCHASE INVOICE (FINAL CORRECTED VERSION)
+# ENDPOINT 2: CREATE PURCHASE INVOICE (FINAL ROBUST VERSION)
 # ==============================================================================
 @frappe.whitelist()
 def create_purchase_invoice():
-    # === THE FINAL BUG FIX ===
-    data = json.loads(frappe.request.data)
+    # === THE FINAL, ROBUST FIX ===
+    data = get_request_data()
     
     try:
         company_name = get_company_by_abbr(data.get("company_abbr"))
 
-        # Idempotently create Supplier and Item
         if not frappe.db.exists("Supplier", data.get("supplier_name")):
             frappe.new_doc("Supplier", {"supplier_name": data.get("supplier_name"), "supplier_group": data.get("supplier_group")}).insert(ignore_permissions=True)
         if not frappe.db.exists("Item", data.get("item_code")):
@@ -145,7 +153,6 @@ def create_purchase_invoice():
 
         warehouse_name = f"Almacén Principal - {data.get('company_abbr')}"
 
-        # Create and submit the Purchase Invoice
         pi = frappe.new_doc("Purchase Invoice")
         pi.company = company_name
         pi.supplier = data.get("supplier_name")
