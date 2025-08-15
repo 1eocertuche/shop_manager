@@ -1,4 +1,5 @@
 import frappe
+import json # <--- IMPORT THE JSON LIBRARY
 from frappe.utils import getdate, nowdate
 import secrets
 
@@ -14,13 +15,13 @@ def get_company_by_abbr(abbr):
     return company_name
 
 # ==============================================================================
-# ENDPOINT 1: SETUP COMPANY AND USER ENVIRONMENT (CORRECTED JSON HANDLING)
+# ENDPOINT 1: SETUP COMPANY AND USER ENVIRONMENT (FINAL CORRECTED VERSION)
 # ==============================================================================
 @frappe.whitelist()
 def setup_company_and_user():
-    # === THE BUG FIX IS HERE ===
-    # Change from frappe.local.form_dict to frappe.get_json()
-    data = frappe.get_json()
+    # === THE FINAL BUG FIX ===
+    # Read the raw request data and parse it as JSON
+    data = json.loads(frappe.request.data)
     
     try:
         company_name = data.get("company_name")
@@ -41,6 +42,8 @@ def setup_company_and_user():
         
         company_doc = frappe.get_doc("Company", company_name)
 
+        # ... (The rest of the function remains unchanged)
+        
         # Part 2: Discover Root Accounts
         asset_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Asset", "is_group": 1})
         income_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Income", "is_group": 1})
@@ -48,25 +51,21 @@ def setup_company_and_user():
         payable_root = frappe.db.get_value("Account", {"company": company_name, "account_type": "Payable", "is_group": 1})
 
         # Part 3: Setup Essential Accounts
-        # Default Receivable Account
         receivable_account_name = f"Deudores - {abbr}"
         if not frappe.db.exists("Account", receivable_account_name):
             frappe.new_doc("Account", {"account_name": "Deudores", "parent_account": asset_root, "company": company_name, "account_type": "Receivable"}).insert(ignore_permissions=True)
         company_doc.default_receivable_account = receivable_account_name
         
-        # Default Income Account
         income_account_name = f"Ventas - {abbr}"
         if not frappe.db.exists("Account", income_account_name):
             frappe.new_doc("Account", {"account_name": "Ventas", "parent_account": income_root, "company": company_name, "account_type": "Income Account"}).insert(ignore_permissions=True)
         company_doc.default_income_account = income_account_name
         
-        # Default Inventory (Stock) Account
         stock_asset_account_name = f"Inventario de Mercancías - {abbr}"
         if not frappe.db.exists("Account", stock_asset_account_name):
             frappe.new_doc("Account", {"account_name": "Inventario de Mercancías", "parent_account": asset_root, "company": company_name, "account_type": "Stock"}).insert(ignore_permissions=True)
         company_doc.default_inventory_account = stock_asset_account_name
         
-        # COGS & Stock Adjustment Accounts
         cogs_account_name = f"Costos de los bienes vendidos - {abbr}"
         if not frappe.db.exists("Account", cogs_account_name):
             frappe.new_doc("Account", {"account_name": "Costos de los bienes vendidos", "parent_account": expense_root, "company": company_name, "is_group": 1, "account_type": "Cost of Goods Sold"}).insert(ignore_permissions=True)
@@ -75,13 +74,11 @@ def setup_company_and_user():
             frappe.new_doc("Account", {"account_name": "Stock Adjustment", "parent_account": cogs_account_name, "company": company_name, "account_type": "Stock Adjustment"}).insert(ignore_permissions=True)
         company_doc.stock_adjustment_account = stock_adj_account_name
 
-        # Stock Received But Not Billed Account
         srbnb_account_name = f"Activo recibido pero no facturado - {abbr}"
         if not frappe.db.exists("Account", srbnb_account_name):
             frappe.new_doc("Account", {"account_name": "Activo recibido pero no facturado", "parent_account": payable_root, "company": company_name, "account_type": "Stock Received But Not Billed"}).insert(ignore_permissions=True)
         company_doc.stock_received_but_not_billed = srbnb_account_name
 
-        # Cash Account
         current_asset_account = frappe.db.get_value("Account", {"account_name": f"Activos Corrientes - {abbr}"}) or asset_root
         if not frappe.db.exists("Account", {"account_name": "Caja General", "company": company_name}):
             frappe.new_doc("Account", {"account_name": "Caja General", "parent_account": current_asset_account, "company": company_name, "account_type": "Cash"}).insert(ignore_permissions=True)
@@ -130,12 +127,12 @@ def setup_company_and_user():
 
 
 # ==============================================================================
-# ENDPOINT 2: CREATE PURCHASE INVOICE (CORRECTED JSON HANDLING)
+# ENDPOINT 2: CREATE PURCHASE INVOICE (FINAL CORRECTED VERSION)
 # ==============================================================================
 @frappe.whitelist()
 def create_purchase_invoice():
-    # === THE BUG FIX IS HERE ===
-    data = frappe.get_json()
+    # === THE FINAL BUG FIX ===
+    data = json.loads(frappe.request.data)
     
     try:
         company_name = get_company_by_abbr(data.get("company_abbr"))
