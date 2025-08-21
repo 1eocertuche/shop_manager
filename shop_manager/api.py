@@ -16,7 +16,7 @@ def get_request_data():
     return frappe.form_dict
 
 # ==============================================================================
-# ENDPOINT 1: SETUP COMPANY AND USER (Correct and Final)
+# ENDPOINT 1: SETUP COMPANY AND USER (FINAL, COMPLETE VERSION)
 # ==============================================================================
 @frappe.whitelist()
 def setup_company_and_user():
@@ -26,15 +26,19 @@ def setup_company_and_user():
         abbr = data.get("company_abbr")
         user_email = data.get("user_email")
 
+        # Part 1: Company Setup
         if not frappe.db.exists("Company", company_name):
             company = frappe.new_doc("Company"); company.company_name = company_name; company.abbr = abbr; company.country = "Colombia"; company.default_currency = "COP"; company.chart_of_accounts = "Colombia PUC Simple"; company.insert(ignore_permissions=True)
         
         company_doc = frappe.get_doc("Company", company_name)
         
+        # Part 2: Account Setup for Sales & Purchasing
         asset_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Asset", "is_group": 1})
         income_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Income", "is_group": 1})
+        expense_root = frappe.db.get_value("Account", {"company": company_name, "root_type": "Expense", "is_group": 1})
         payable_root = frappe.db.get_value("Account", {"company": company_name, "account_type": "Payable", "is_group": 1})
 
+        # Standard Accounts
         receivable_account_name = f"Deudores - {abbr}"
         if not frappe.db.exists("Account", receivable_account_name):
             acc = frappe.new_doc("Account"); acc.account_name = "Deudores"; acc.parent_account = asset_root; acc.company = company_name; acc.account_type = "Receivable"; acc.insert(ignore_permissions=True)
@@ -55,11 +59,24 @@ def setup_company_and_user():
             acc = frappe.new_doc("Account"); acc.account_name = "Activo recibido pero no facturado"; acc.parent_account = payable_root; acc.company = company_name; acc.account_type = "Stock Received But Not Billed"; acc.insert(ignore_permissions=True)
         company_doc.stock_received_but_not_billed = srbnb_account_name
 
+        # === THE FINAL BUG FIX IS HERE ===
+        # Create and set the required Stock Adjustment Account
+        cogs_account_name = f"Costo de los bienes vendidos - {abbr}"
+        if not frappe.db.exists("Account", cogs_account_name):
+            acc = frappe.new_doc("Account"); acc.account_name = "Costo de los bienes vendidos"; acc.parent_account = expense_root; acc.company = company_name; acc.is_group = 1; acc.account_type = "Cost of Goods Sold"; acc.insert(ignore_permissions=True)
+        
+        stock_adj_account_name = f"Ajuste de stock - {abbr}"
+        if not frappe.db.exists("Account", stock_adj_account_name):
+            acc = frappe.new_doc("Account"); acc.account_name = "Ajuste de stock"; acc.parent_account = cogs_account_name; acc.company = company_name; acc.account_type = "Stock Adjustment"; acc.insert(ignore_permissions=True)
+        company_doc.stock_adjustment_account = stock_adj_account_name
+        # === END OF FIX ===
+
         if not frappe.db.exists("Account", {"account_name": "Caja General", "company": company_name}):
             acc = frappe.new_doc("Account"); acc.account_name = "Caja General"; acc.parent_account = asset_root; acc.company = company_name; acc.account_type = "Cash"; acc.insert(ignore_permissions=True)
             
         company_doc.save(ignore_permissions=True)
 
+        # Warehouses and Groups (no changes needed)
         if not frappe.db.exists("Warehouse", f"Bodega tienda - {abbr}"):
             wh = frappe.new_doc("Warehouse"); wh.warehouse_name = f"Bodega tienda - {abbr}"; wh.company = company_name; wh.insert(ignore_permissions=True)
         if not frappe.db.exists("Warehouse", f"Almacén Principal - {abbr}"):
@@ -73,6 +90,7 @@ def setup_company_and_user():
         if not frappe.db.exists("UOM", data.get("default_uom")):
             uom = frappe.new_doc("UOM"); uom.uom_name = data.get("default_uom"); uom.insert(ignore_permissions=True)
 
+        # User Creation (no changes needed)
         if not frappe.db.exists("User", user_email):
             user = frappe.new_doc("User"); user.email = user_email; user.first_name = data.get("user_first_name"); user.last_name = data.get("user_last_name"); user.send_welcome_email = 0; user.add_roles("Accounts User", "Purchase User", "Stock User", "Sales User"); user.insert(ignore_permissions=True)
             api_key = secrets.token_hex(16); api_secret = secrets.token_hex(16); user.api_key = api_key; user.set("api_secret", api_secret); user.save(ignore_permissions=True)
@@ -90,9 +108,8 @@ def setup_company_and_user():
     except Exception as e:
         frappe.db.rollback(); frappe.log_error(title="Company & User Setup Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during setup: {str(e)}")
 
-# ==============================================================================
-# ENDPOINT 2: CREATE SALES INVOICE AND PAYMENT (FINAL CORRECTED VERSION)
-# ==============================================================================
+
+# The other two functions (create_sales_invoice_with_payment and create_purchase_invoice) do not need any more changes.
 @frappe.whitelist()
 def create_sales_invoice_with_payment():
     data = get_request_data()
@@ -100,66 +117,43 @@ def create_sales_invoice_with_payment():
         company_name = frappe.db.get_value("Company", {"abbr": data.get("company_abbr")}, "name")
         if not company_name:
             frappe.throw(f"Company with abbreviation '{data.get('company_abbr')}' not found.")
-        
         company_doc = frappe.get_doc("Company", company_name)
-        
         if not frappe.db.exists("Customer", data.get("customer_name")):
             customer = frappe.new_doc("Customer"); customer.customer_name = data.get("customer_name"); customer.customer_group = data.get("customer_group"); customer.insert(ignore_permissions=True)
         if not frappe.db.exists("Item", data.get("item_code")):
             item = frappe.new_doc("Item"); item.item_code = data.get("item_code"); item.item_name = data.get("item_name"); item.item_group = data.get("item_group"); item.stock_uom = data.get("uom_name"); item.is_stock_item = 1; item.insert(ignore_permissions=True)
-            
         warehouse_name = f"Bodega tienda - {data.get('company_abbr')}"
-
-        # === THE BUG FIX IS HERE ===
-        # Convert incoming string data to numbers before doing math
         item_qty_val = int(data.get("item_qty", 1))
         item_rate_val = float(data.get("item_rate", 0))
-
         stock_entry = frappe.new_doc("Stock Entry"); stock_entry.stock_entry_type = "Material Receipt"; stock_entry.company = company_name
         stock_entry.append("items", { "item_code": data.get("item_code"), "qty": item_qty_val * 10, "t_warehouse": warehouse_name, "basic_rate": item_rate_val * 0.5 }); stock_entry.submit()
-
         si = frappe.new_doc("Sales Invoice"); si.customer = data.get("customer_name"); si.company = company_name; si.posting_date = getdate(data.get("posting_date", nowdate())); si.update_stock = 1
-        # Use the converted numbers here as well
         si.append("items", { "item_code": data.get("item_code"), "qty": item_qty_val, "rate": item_rate_val, "warehouse": warehouse_name, "income_account": company_doc.default_income_account }); si.submit()
-        
         cash_account = frappe.db.get_value("Account", {"account_name": "Caja General", "company": company_name})
-
         pe = frappe.new_doc("Payment Entry"); pe.payment_type = "Receive"; pe.party_type = "Customer"; pe.party = data.get("customer_name"); pe.company = company_name; pe.paid_amount = si.grand_total; pe.received_amount = si.grand_total; pe.paid_to = cash_account
         pe.append("references", { "reference_doctype": "Sales Invoice", "reference_name": si.name, "allocated_amount": si.grand_total }); pe.submit()
-        
         frappe.db.commit()
         return { "status": "SUCCESS", "message": f"Sales cycle created successfully.", "sales_invoice": si.name, "payment_entry": pe.name }
-        
     except Exception as e:
         frappe.db.rollback(); frappe.log_error(title="Sales Invoice Cycle Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during the sales invoice cycle: {str(e)}")
 
-# ==============================================================================
-# ENDPOINT 3: CREATE PURCHASE INVOICE (Correct and Final)
-# ==============================================================================
 @frappe.whitelist()
 def create_purchase_invoice():
     data = get_request_data()
     try:
-        company_name = frappe.db.get_company_by_abbr(data.get("company_abbr"))
+        company_name = frappe.db.get_value("Company", {"abbr": data.get("company_abbr")}, "name")
         if not company_name:
             frappe.throw(f"Company with abbreviation '{data.get('company_abbr')}' not found.")
-
         if not frappe.db.exists("Supplier", data.get("supplier_name")):
             s = frappe.new_doc("Supplier"); s.supplier_name = data.get("supplier_name"); s.supplier_group = data.get("supplier_group"); s.insert(ignore_permissions=True)
         if not frappe.db.exists("Item", data.get("item_code")):
             i = frappe.new_doc("Item"); i.item_code = data.get("item_code"); i.item_name = data.get("item_name"); i.item_group = data.get("item_group"); i.stock_uom = data.get("uom_name"); i.is_stock_item = 1; i.insert(ignore_permissions=True)
-
         warehouse_name = f"Almacén Principal - {data.get('company_abbr')}"
-        
-        # Convert incoming string data to numbers
         item_qty_val = int(data.get("item_qty", 1))
         item_rate_val = float(data.get("item_rate", 0))
-
         pi = frappe.new_doc("Purchase Invoice"); pi.company = company_name; pi.supplier = data.get("supplier_name"); pi.posting_date = getdate(data.get("posting_date", nowdate())); pi.due_date = getdate(data.get("due_date")); pi.update_stock = 1; pi.set_posting_time = 1
         pi.append("items", { "item_code": data.get("item_code"), "qty": item_qty_val, "rate": item_rate_val, "warehouse": warehouse_name }); pi.submit()
-
         frappe.db.commit()
         return { "status": "SUCCESS", "message": "Purchase Invoice created and submitted successfully.", "purchase_invoice": pi.name }
-        
     except Exception as e:
         frappe.db.rollback(); frappe.log_error(title="Purchase Invoice Creation Failed", message=frappe.get_traceback()); frappe.throw(f"An error occurred during purchase invoice creation: {str(e)}")
